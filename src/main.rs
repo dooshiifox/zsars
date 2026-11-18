@@ -10,12 +10,14 @@ fn main() {
         kbloop.start_loop();
     });
 
-    kb.request_pairing();
     kb.request_firmware_version();
+    kb.request_pairing();
     kb.request_firmware_protocol_version();
     std::thread::sleep(Duration::from_secs(1));
-    kb.set_layer(5, true);
-    // kb.set_layer(1, true);
+    // kb.set_layer(5, true);
+    // kb.take_rgb_control(false);
+    // kb.take_led_control(false);
+    kb.set_rgb_led(8, 250, 0, 100);
     std::thread::sleep(Duration::from_secs(100));
 }
 
@@ -92,7 +94,7 @@ pub enum KeyEventState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyboardResponse<'a> {
     ProtocolVersion(u8),
-    FirmwareVersion(&'a [u8]),
+    FirmwareVersion(&'a str),
     PairingInit(&'a [u8]),
     PairingKeyInput(&'a [u8]),
     PairingFail(&'a [u8]),
@@ -107,6 +109,7 @@ pub enum KeyboardResponse<'a> {
     },
     ToggleSmartLayer(&'a [u8]),
     TriggerSmartLayer(&'a [u8]),
+    Unknown(u8, &'a [u8]),
 }
 impl<'a> KeyboardResponse<'a> {
     fn parse_incoming_packet(data: &'a [u8; 0x21]) -> KeyboardResponse<'a> {
@@ -119,7 +122,7 @@ impl<'a> KeyboardResponse<'a> {
         let end = data.iter().position(|x| *x == 0xfe).unwrap_or(data.len());
         let data = &data[1..end];
         match ty {
-            0 => KeyboardResponse::FirmwareVersion(data),
+            0 => KeyboardResponse::FirmwareVersion(str::from_utf8(data).unwrap()),
             1 => KeyboardResponse::PairingInit(data),
             2 => KeyboardResponse::PairingKeyInput(data),
             3 => KeyboardResponse::PairingFail(data),
@@ -134,10 +137,12 @@ impl<'a> KeyboardResponse<'a> {
                     KeyEventState::Released
                 },
             },
-            // i think 8 isnt used
+            // 8 is not found in the reverse-engineed system but is sent
+            // after taking back RGB controls
+            8 => KeyboardResponse::Unknown(ty, data),
             9 => KeyboardResponse::ToggleSmartLayer(data),
             10 => KeyboardResponse::TriggerSmartLayer(data),
-            _ => panic!("unknown type"),
+            _ => KeyboardResponse::Unknown(ty, data),
         }
     }
 }
@@ -149,10 +154,10 @@ pub enum Command {
     HandleIncomingPacket,
     SetLayer { layer: u8, activate_layer: bool },
     TakeRgbControl { b: bool },
-    SetRgbLed { a: u8, b: u8, c: u8, d: u8 },
-    SetStatusLed { index: u8, b: bool },
+    SetRgbLed { key_index: u8, r: u8, g: u8, b: u8 },
+    SetStatusLed { index: u8, enable: bool },
     UpdateBrightness { increase: bool },
-    SetRgbAll { a: u8, b: u8, c: u8 },
+    SetRgbAll { r: u8, g: u8, b: u8 },
     TakeLedControl { b: bool },
     RequestFirmwareProtocolVersion,
 }
@@ -167,10 +172,10 @@ impl Command {
                 activate_layer,
             } => Box::new([0, 4, *activate_layer as u8, *layer]),
             Command::TakeRgbControl { b } => Box::new([0, 5, *b as u8]),
-            Command::SetRgbLed { a, b, c, d } => Box::new([0, 6, *a, *b, *c, *d]),
-            Command::SetStatusLed { index, b } => Box::new([0, 7, *index, *b as u8]),
+            Command::SetRgbLed { key_index, r, g, b } => Box::new([0, 6, *key_index, *r, *g, *b]),
+            Command::SetStatusLed { index, enable } => Box::new([0, 7, *index, *enable as u8]),
             Command::UpdateBrightness { increase } => Box::new([0, 8, *increase as u8]),
-            Command::SetRgbAll { a, b, c } => Box::new([0, 9, *a, *b, *c]),
+            Command::SetRgbAll { r, g, b } => Box::new([0, 9, *r, *g, *b]),
             Command::TakeLedControl { b } => Box::new([0, 10, *b as u8]),
             Command::RequestFirmwareProtocolVersion => Box::new([0, 0xfe]),
         }
@@ -185,6 +190,9 @@ pub struct Keyboard {
     pub sender: mpsc::Sender<Command>,
 }
 impl Keyboard {
+    /// Pair the computer with the keyboard, allowing it to take commands.
+    /// Required after plugging it in, otherwise commands will be silently
+    /// ignored.
     pub fn request_pairing(&self) {
         self.send(Command::RequestPairing);
     }
@@ -204,21 +212,29 @@ impl Keyboard {
         });
     }
 
+    /// Sets a specific LED behind a key to a color.
+    ///
+    /// Also takes control of the keyboard's RGB. Call `[take_rgb_control](false)`
+    /// to reset the keyboard back to how the user defined.
+    pub fn set_rgb_led(&self, key_index: u8, r: u8, g: u8, b: u8) {
+        self.send(Command::SetRgbLed { key_index, r, g, b });
+    }
+
+    pub fn set_rgb_all(&self, r: u8, g: u8, b: u8) {
+        self.send(Command::SetRgbAll { r, g, b });
+    }
+
     pub fn take_rgb_control(&self, b: bool) {
         self.send(Command::TakeRgbControl { b });
     }
 
-    pub fn set_rgb_led(&self, a: u8, b: u8, c: u8, d: u8) {
-        self.send(Command::SetRgbLed { a, b, c, d });
-    }
-
-    pub fn set_rgb_all(&self, a: u8, b: u8, c: u8) {
-        self.send(Command::SetRgbAll { a, b, c });
-    }
-
-    pub fn set_status_led(&self, index: u8, b: bool) {
+    /// Enables or disables a status LED
+    ///
+    /// Also takes control of the keyboard's status LEDs.
+    /// Call `[take_led_control](false)` to reset functionality to normal
+    pub fn set_status_led(&self, index: u8, enable: bool) {
         assert!(index <= self.max_status_led_index());
-        self.send(Command::SetStatusLed { b, index });
+        self.send(Command::SetStatusLed { enable, index });
     }
 
     pub fn take_led_control(&self, b: bool) {
@@ -238,7 +254,7 @@ impl Keyboard {
             0x4976 | 0x2030 => 2, // Ergodox EZ Glow
             0xc6ce | 0xc6cf => 1, // Planck EZ Standard/Glow
             0x1969 => 5,          // Moonlander MK1
-            0x1977 | 0x1978 => 2, // Voyager
+            0x1977 | 0x1978 => 3, // Voyager
             _ => 0,
         }
     }
