@@ -47,7 +47,7 @@ impl Keyboard {
         for dev_info in api.device_list() {
             let vid = dev_info.vendor_id();
             let pid = dev_info.product_id();
-            if dev_info.path() != c"/dev/hidraw8" {
+            if dev_info.interface_number() != 1 {
                 continue;
             }
 
