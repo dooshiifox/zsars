@@ -2,6 +2,35 @@
 name = "zsars"
 version = "0.1.0"
 edition = "2024"
+description = "Connect to a ZSA keyboard and send & receive events"
+license = "MIT"
+
+[lib]
 
 [dependencies]
 hidapi = "2.6.7"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+ctrlc = "3.5.3"
+
+[[example]]
+name = "connect"
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+# DENY PANICS:
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+unreachable = "deny"
+unimplemented = "deny"
+unchecked_time_subtraction = "deny"
+todo = "deny"
+string_slice = "deny"
+panic_in_result_fn = "deny"
+panic = "deny"
+exit = "deny"
+as_conversions = "deny"
