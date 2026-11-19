@@ -47,11 +47,18 @@ impl Keyboard {
         for dev_info in api.device_list() {
             let vid = dev_info.vendor_id();
             let pid = dev_info.product_id();
+            // There are some devices that work and some that dont and frankly
+            // im not sure how to tell them apart. This is the only difference
+            // I could visibly find so Im using it.
+            // TODO: decompile this part to make it more stable.
             if dev_info.interface_number() != 1 {
                 continue;
             }
 
             if let Some(keyboard) = KeyboardType::identify_keyboard(vid, pid) {
+                // Note: you need to open the path directly. dev_info.open()
+                // does not work for some reason; I think it gets the events
+                // and not the raw data.
                 let device = api.open_path(dev_info.path())?;
                 let kb = Self {
                     device,
