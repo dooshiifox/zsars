@@ -17,6 +17,9 @@ ctrlc = "3.5.3"
 [[example]]
 name = "connect"
 
+[[example]]
+name = "readme"
+
 [lints.clippy]
 pedantic = { level = "deny", priority = -1 }
 nursery = { level = "deny", priority = -1 }
